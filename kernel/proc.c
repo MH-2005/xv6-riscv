@@ -29,7 +29,7 @@ prng(void)
     prng_state = (unsigned long)ticks + 1;
     prng_initialized = 1;
   }
-  prng_state = prng_state * 1103515245 + 12345;
+  prng_state = prng_state * 1103515245 + 12345 + ticks;
   return (unsigned int)((prng_state / 65536) % 32768);
 }
 #endif
