@@ -477,160 +477,148 @@ scheduler(void)
 
   for (;;)
   {
-    // Avoid deadlock by ensuring interrupt-on when no lock held
     intr_on();
-
-#ifdef SCHEDULER
-#if SCHEDULER == 1 // PRIORITY scheduling
-    intr_off();
-    int found = 0;
-    int min_priority = 101;
-
-    // First pass: find minimum priority among RUNNABLE processes
-    // (lower number = higher priority)
-    for (p = proc; p < &proc[NPROC]; p++)
-    {
-      acquire(&p->lock);
-      if (p->state == RUNNABLE && p->priority < min_priority)
-        min_priority = p->priority;
-      release(&p->lock);
-    }
-
-    if (min_priority == 101)
-    {
-      asm volatile("wfi");
-      continue;
-    }
-
-    // Second pass: find next RUNNABLE proc with min_priority
-    // Start after last_proc_index for Round-Robin fairness among equal priority
-    struct proc *chosen = 0;
-    int chosen_index = -1;
-    for (int i = 1; i <= NPROC; i++)
-    {
-      int idx = (last_proc_index + i) % NPROC;
-      p = &proc[idx];
-      acquire(&p->lock);
-      if (p->state == RUNNABLE && p->priority == min_priority)
-      {
-        chosen = p;
-        chosen_index = idx;
-        break;
-      }
-      release(&p->lock);
-    }
-
-    if (chosen != 0)
-    {
-      p = chosen;
-      acquire(&p->lock);
-      if (p->state == RUNNABLE)
-      {
-        p->state = RUNNING;
-        c->proc = p;
-        swtch(&c->context, &p->context);
-        c->proc = 0;
-        // Update round-robin cursor for next scheduling decision
-        last_proc_index = chosen_index;
-        found = 1;
-      }
-      release(&p->lock);
-    }
-
-    if (found == 0)
-      asm volatile("wfi");
-
-#elif SCHEDULER == 2 // LOTTERY scheduling
     intr_off();
 
-    // Sum tickets across all RUNNABLE procs (need sched_lock for multi-core)
-    acquire(&sched_lock);
-    int total_tickets = 0;
-    for (p = proc; p < &proc[NPROC]; p++)
+#if defined(SCHEDULER) && SCHEDULER == 1
+    // Priority scheduling: pick RUNNABLE proc with lowest priority value.
+    // Two passes: first find the minimum priority among RUNNABLE procs,
+    // then pick the next one after last_proc_index with that priority
+    // (Round-Robin tie-breaking, per spec).
     {
-      acquire(&p->lock);
-      if (p->state == RUNNABLE)
-        total_tickets += p->tickets;
-      release(&p->lock);
-    }
-    release(&sched_lock);
+      int found = 0;
+      int min_priority = 101;
 
-    if (total_tickets == 0)
-    {
-      asm volatile("wfi");
-      continue;
-    }
-
-    // Pick winning ticket using simple LCG PRNG (per spec)
-    // prng_lock protects shared state across CPUs
-    acquire(&prng_lock);
-    unsigned int winning = prng() % total_tickets;
-    release(&prng_lock);
-
-    // Find winner by cumulative ticket count (standard lottery algorithm)
-    struct proc *chosen = 0;
-    int counter = 0;
-    for (p = proc; p < &proc[NPROC]; p++)
-    {
-      acquire(&p->lock);
-      if (p->state == RUNNABLE)
+      for (p = proc; p < &proc[NPROC]; p++)
       {
-        counter += p->tickets;
-        if (counter > winning)
+        acquire(&p->lock);
+        if (p->state == RUNNABLE && p->priority < min_priority)
+          min_priority = p->priority;
+        release(&p->lock);
+      }
+
+      if (min_priority == 101)
+      {
+        asm volatile("wfi");
+        continue;
+      }
+
+      acquire(&sched_lock);
+      int start_index = last_proc_index;
+      release(&sched_lock);
+
+      struct proc *chosen = 0;
+      int chosen_index = -1;
+      for (int i = 1; i <= NPROC; i++)
+      {
+        int idx = (start_index + i) % NPROC;
+        p = &proc[idx];
+        acquire(&p->lock);
+        if (p->state == RUNNABLE && p->priority == min_priority)
         {
           chosen = p;
+          chosen_index = idx;
           break;
         }
+        release(&p->lock);
       }
-      release(&p->lock);
+
+      if (chosen != 0)
+      {
+        // chosen->lock is still held from the search loop above.
+        // Do NOT acquire it again here — that would self-deadlock.
+        chosen->state = RUNNING;
+        c->proc = chosen;
+        swtch(&c->context, &chosen->context);
+        c->proc = 0;
+
+        acquire(&sched_lock);
+        last_proc_index = chosen_index;
+        release(&sched_lock);
+
+        release(&chosen->lock);
+        found = 1;
+      }
+
+      if (found == 0)
+        asm volatile("wfi");
     }
 
-    if (chosen != 0)
+#elif defined(SCHEDULER) && SCHEDULER == 2
+    // Lottery scheduling: pick a RUNNABLE proc at random, weighted by tickets.
     {
-      p = chosen;
-      acquire(&p->lock);
-      if (p->state == RUNNABLE)
+      int total_tickets = 0;
+      for (p = proc; p < &proc[NPROC]; p++)
       {
-        p->state = RUNNING;
-        c->proc = p;
-        p->sched_count++;  // Track how often each proc gets CPU (for stats)
-        swtch(&c->context, &p->context);
-        c->proc = 0;
+        acquire(&p->lock);
+        if (p->state == RUNNABLE)
+          total_tickets += p->tickets;
+        release(&p->lock);
       }
-      release(&p->lock);
-    }
-    else
-    {
-      asm volatile("wfi");
+
+      if (total_tickets == 0)
+      {
+        asm volatile("wfi");
+        continue;
+      }
+
+      acquire(&prng_lock);
+      unsigned int winning = prng() % total_tickets;
+      release(&prng_lock);
+
+      struct proc *chosen = 0;
+      int counter = 0;
+      for (p = proc; p < &proc[NPROC]; p++)
+      {
+        acquire(&p->lock);
+        if (p->state == RUNNABLE)
+        {
+          counter += p->tickets;
+          if (counter > winning)
+          {
+            chosen = p;
+            break;
+          }
+        }
+        release(&p->lock);
+      }
+
+      if (chosen != 0)
+      {
+        // chosen->lock is still held from the search loop above.
+        // Do NOT acquire it again here — that would self-deadlock.
+        chosen->state = RUNNING;
+        c->proc = chosen;
+        chosen->sched_count++;
+        swtch(&c->context, &chosen->context);
+        c->proc = 0;
+        release(&chosen->lock);
+      }
+      else
+      {
+        asm volatile("wfi");
+      }
     }
 
-#else // Default: Round-Robin (original xv6)
-    for (p = proc; p < &proc[NPROC]; p++)
+#else
+    // Default: original xv6 Round-Robin scheduling.
     {
-      acquire(&p->lock);
-      if (p->state == RUNNABLE)
+      int found = 0;
+      for (p = proc; p < &proc[NPROC]; p++)
       {
-        p->state = RUNNING;
-        c->proc = p;
-        swtch(&c->context, &p->context);
-        c->proc = 0;
+        acquire(&p->lock);
+        if (p->state == RUNNABLE)
+        {
+          p->state = RUNNING;
+          c->proc = p;
+          swtch(&c->context, &p->context);
+          c->proc = 0;
+          found = 1;
+        }
+        release(&p->lock);
       }
-      release(&p->lock);
-    }
-#endif
-
-#else // SCHEDULER not defined — Default Round-Robin (original xv6)
-    for (p = proc; p < &proc[NPROC]; p++)
-    {
-      acquire(&p->lock);
-      if (p->state == RUNNABLE)
-      {
-        p->state = RUNNING;
-        c->proc = p;
-        swtch(&c->context, &p->context);
-        c->proc = 0;
-      }
-      release(&p->lock);
+      if (found == 0)
+        asm volatile("wfi");
     }
 #endif
   }
