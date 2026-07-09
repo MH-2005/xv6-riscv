@@ -5,6 +5,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "pinfo.h"
 
 struct cpu cpus[NCPU];
 
@@ -124,6 +125,9 @@ allocproc(void)
 found:
   p->pid = allocpid();
   p->state = USED;
+  
+  p->priority = 50;
+  p->tickets = 1;
 
   // Allocate a trapframe page.
   if ((p->trapframe = (struct trapframe *)kalloc()) == 0) {
@@ -689,4 +693,31 @@ procdump(void)
     printk("%d %s %s", p->pid, state, p->name);
     printk("\n");
   }
+}
+
+int
+getpinfo(uint64 addr)
+{
+  struct proc *p;
+  struct pinfo pi;
+  int i = 0;
+  struct proc *cp = myproc();
+
+  for (p = proc; p < &proc[NPROC]; p++) {
+    acquire(&p->lock);
+    if (p->state != UNUSED) {
+      pi.pid = p->pid;
+      pi.state = p->state;
+      pi.priority = p->priority;
+      pi.tickets = p->tickets;
+      safestrcpy(pi.name, p->name, sizeof(pi.name));
+      if (copyout(cp->pagetable, addr + i * sizeof(struct pinfo), (char *)&pi, sizeof(pi)) < 0) {
+        release(&p->lock);
+        return -1;
+      }
+      i++;
+    }
+    release(&p->lock);
+  }
+  return i;
 }
