@@ -11,7 +11,10 @@ struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
 
+// last_proc_index only used for PRIORITY scheduler (Round-Robin tie-breaking)
+#if defined(SCHEDULER) && SCHEDULER == 1
 static int last_proc_index = -1;
+#endif
 
 // Spinlocks for multi-core safety
 static struct spinlock sched_lock;

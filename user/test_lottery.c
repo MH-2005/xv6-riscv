@@ -32,7 +32,9 @@ main(int argc, char *argv[])
   }
 
   // Wait a bit for scheduling to happen
-  sleep(10);
+  // Wait for scheduling
+  volatile long w = 0;
+  for (long j = 0; j < 5000000; j++) w++;
 
   // Get scheduling statistics
   struct pinfo pi[NPROC];
