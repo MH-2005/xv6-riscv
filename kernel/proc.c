@@ -490,6 +490,7 @@ scheduler(void)
     }
 
     // Second pass: pick next RUNNABLE process with min_priority (Round-Robin among ties)
+    // Hold lock through swtch to avoid race condition (xv6 pattern)
     struct proc *chosen = 0;
     int chosen_index = -1;
     for (int i = 1; i <= NPROC; i++)
@@ -501,26 +502,24 @@ scheduler(void)
       {
         chosen = p;
         chosen_index = idx;
-        release(&p->lock);
-        break;
+        break;  // KEEP LOCK HELD through swtch
       }
       release(&p->lock);
     }
 
     if (chosen != 0)
     {
-      p = chosen;
-      acquire(&p->lock);
-      if (p->state == RUNNABLE)
+      // Lock already held from search loop
+      if (chosen->state == RUNNABLE)
       {
-        p->state = RUNNING;
-        c->proc = p;
-        swtch(&c->context, &p->context);
+        chosen->state = RUNNING;
+        c->proc = chosen;
+        swtch(&c->context, &chosen->context);
         c->proc = 0;
         last_proc_index = chosen_index;
         found = 1;
       }
-      release(&p->lock);
+      release(&chosen->lock);
     }
 
     if (found == 0)
@@ -549,6 +548,7 @@ scheduler(void)
     unsigned int winning = prng() % total_tickets;
 
     // Find the winning process
+    // Hold lock through swtch to avoid race condition (xv6 pattern)
     struct proc *chosen = 0;
     int counter = 0;
     for (p = proc; p < &proc[NPROC]; p++)
@@ -560,8 +560,7 @@ scheduler(void)
         if (counter > winning)
         {
           chosen = p;
-          release(&p->lock);
-          break;
+          break;  // KEEP LOCK HELD through swtch
         }
       }
       release(&p->lock);
@@ -569,16 +568,15 @@ scheduler(void)
 
     if (chosen != 0)
     {
-      p = chosen;
-      acquire(&p->lock);
-      if (p->state == RUNNABLE)
+      // Lock already held from search loop
+      if (chosen->state == RUNNABLE)
       {
-        p->state = RUNNING;
-        c->proc = p;
-        swtch(&c->context, &p->context);
+        chosen->state = RUNNING;
+        c->proc = chosen;
+        swtch(&c->context, &chosen->context);
         c->proc = 0;
       }
-      release(&p->lock);
+      release(&chosen->lock);
     }
     else
     {
