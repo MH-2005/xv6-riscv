@@ -163,7 +163,7 @@ UPROGS=\
 	$U/_lottery\
 	$U/_test_prio\
 	$U/_test_lottery\
-
+	$U/_test_ps\\
 fs.img: mkfs/mkfs README $(UPROGS)
 	mkfs/mkfs fs.img README $(UPROGS)
 
