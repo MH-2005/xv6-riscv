@@ -5,12 +5,14 @@ int
 main(int argc, char *argv[])
 {
   int n = 20;
-  printf("=== Stress Test: %d children ===\n", n);
+  printf("=== Stress Test: %d children ===
+", n);
 
   for (int i = 0; i < n; i++) {
     int pid = fork();
     if (pid < 0) {
-      printf("fork failed at %d\n", i);
+      printf("fork failed at %d
+", i);
       exit(1);
     }
     if (pid == 0) {
@@ -28,6 +30,7 @@ main(int argc, char *argv[])
     wait(0);
   }
 
-  printf("=== Stress Test Complete: No crash/deadlock ===\n");
+  printf("=== Stress Test Complete: No crash/deadlock ===
+");
   exit(0);
 }
