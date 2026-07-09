@@ -20,8 +20,8 @@ static int last_proc_index = -1;
 static struct spinlock sched_lock;
 static struct spinlock prng_lock;
 
-// Simple Linear Congruential Generator PRNG for lottery scheduling.
-// Section 3: uses system ticks as seed (requirement from project spec).
+// Simple Linear Congruential Generator (LCG) for lottery scheduling.
+// Spec requires simple PRNG without external libs, seeded from system ticks.
 // Only compiled when SCHEDULER == 2 (LOTTERY)
 #ifdef SCHEDULER
 #if SCHEDULER == 2
@@ -31,11 +31,12 @@ static int prng_initialized = 0;
 static unsigned int
 prng(void)
 {
-  // Seed only once using system ticks
+  // Seed once from system ticks (spec requirement)
   if (!prng_initialized) {
     prng_state = (unsigned long)ticks + 1;
     prng_initialized = 1;
   }
+  // Standard LCG parameters, add ticks each call for more entropy
   prng_state = prng_state * 1103515245 + 12345 + ticks;
   return (unsigned int)((prng_state / 65536) % 32768);
 }
@@ -159,6 +160,7 @@ found:
   p->pid = allocpid();
   p->state = USED;
   
+  // Default priority = 50 (mid-range, per spec), tickets = 1 (min for lottery)
   p->priority = 50;
   p->tickets = 1;
   p->sched_count = 0;
@@ -328,8 +330,8 @@ kfork(void)
 
   safestrcpy(np->name, p->name, sizeof(p->name));
 
-  // Inherit parent's tickets and priority — Section 3: Lottery scheduling
-  // Acquire parent lock to avoid race condition with setpriority
+  // Inherit parent's tickets and priority (Section 3: Lottery scheduling)
+  // Lock parent to avoid race with setpriority() running on another CPU
   acquire(&p->lock);
   np->tickets = p->tickets;
   np->priority = p->priority;
@@ -485,6 +487,7 @@ scheduler(void)
     int min_priority = 101;
 
     // First pass: find minimum priority among RUNNABLE processes
+    // (lower number = higher priority)
     for (p = proc; p < &proc[NPROC]; p++)
     {
       acquire(&p->lock);
@@ -499,7 +502,8 @@ scheduler(void)
       continue;
     }
 
-    // Second pass: pick next RUNNABLE process with min_priority (Round-Robin among ties)
+    // Second pass: find next RUNNABLE proc with min_priority
+    // Start after last_proc_index for Round-Robin fairness among equal priority
     struct proc *chosen = 0;
     int chosen_index = -1;
     for (int i = 1; i <= NPROC; i++)
@@ -526,6 +530,7 @@ scheduler(void)
         c->proc = p;
         swtch(&c->context, &p->context);
         c->proc = 0;
+        // Update round-robin cursor for next scheduling decision
         last_proc_index = chosen_index;
         found = 1;
       }
@@ -538,7 +543,7 @@ scheduler(void)
 #elif SCHEDULER == 2 // LOTTERY scheduling
     intr_off();
 
-    // Calculate total tickets of all RUNNABLE processes
+    // Sum tickets across all RUNNABLE procs (need sched_lock for multi-core)
     acquire(&sched_lock);
     int total_tickets = 0;
     for (p = proc; p < &proc[NPROC]; p++)
@@ -556,12 +561,13 @@ scheduler(void)
       continue;
     }
 
-    // Generate winning ticket using PRNG seeded with ticks (thread-safe)
+    // Pick winning ticket using simple LCG PRNG (per spec)
+    // prng_lock protects shared state across CPUs
     acquire(&prng_lock);
     unsigned int winning = prng() % total_tickets;
     release(&prng_lock);
 
-    // Find the winning process
+    // Find winner by cumulative ticket count (standard lottery algorithm)
     struct proc *chosen = 0;
     int counter = 0;
     for (p = proc; p < &proc[NPROC]; p++)
@@ -587,7 +593,7 @@ scheduler(void)
       {
         p->state = RUNNING;
         c->proc = p;
-        p->sched_count++;  // Increment schedule counter for statistics
+        p->sched_count++;  // Track how often each proc gets CPU (for stats)
         swtch(&c->context, &p->context);
         c->proc = 0;
       }
@@ -861,6 +867,7 @@ getpinfo(uint64 addr)
 
   for (p = proc; p < &proc[NPROC]; p++) {
     acquire(&p->lock);
+    // Include all non-UNUSED processes (not just RUNNABLE) per spec
     if (p->state != UNUSED) {
       pi.pid = p->pid;
       pi.state = p->state;
@@ -868,6 +875,7 @@ getpinfo(uint64 addr)
       pi.tickets = p->tickets;
       pi.sched_count = p->sched_count;
       safestrcpy(pi.name, p->name, sizeof(pi.name));
+      // copyout needed because kernel/user address spaces are separate
       if (copyout(cp->pagetable, addr + i * sizeof(struct pinfo), (char *)&pi, sizeof(pi)) < 0) {
         release(&p->lock);
         return -1;
@@ -884,11 +892,13 @@ setpriority(int pid, int priority)
 {
   struct proc *p;
 
+  // Range check per spec: 0 (highest) to 100 (lowest)
   if (priority < 0 || priority > 100)
     return -1;
 
   for (p = proc; p < &proc[NPROC]; p++) {
     acquire(&p->lock);
+    // Skip UNUSED slots - can't set priority on non-existent proc
     if (p->pid == pid && p->state != UNUSED) {
       p->priority = priority;
       release(&p->lock);

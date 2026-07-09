@@ -89,9 +89,9 @@ struct proc {
   int xstate;           // Exit status to be returned to parent's wait
   int pid;              // Process ID
 
-  int priority;
-  int tickets;
-  int sched_count;  // Number of times scheduled (for lottery verification)
+  int priority;       // 0=highest ... 100=lowest (default 50)
+  int tickets;        // lottery tickets, default 1 (inherited on fork)
+  int sched_count;    // how many times this proc got CPU (lottery stats)
 
   // wait_lock must be held when using this:
   struct proc *parent; // Parent process
