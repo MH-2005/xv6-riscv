@@ -19,12 +19,16 @@ static int last_proc_index = -1;
 #ifdef SCHEDULER
 #if SCHEDULER == 2
 static unsigned long prng_state = 1;
+static int prng_initialized = 0;
 
 static unsigned int
 prng(void)
 {
-  // Use system ticks as entropy source for the seed
-  prng_state = (unsigned long)ticks + 1;
+  // Seed only once using system ticks
+  if (!prng_initialized) {
+    prng_state = (unsigned long)ticks + 1;
+    prng_initialized = 1;
+  }
   prng_state = prng_state * 1103515245 + 12345;
   return (unsigned int)((prng_state / 65536) % 32768);
 }
@@ -315,8 +319,11 @@ kfork(void)
   safestrcpy(np->name, p->name, sizeof(p->name));
 
   // Inherit parent's tickets and priority — Section 3: Lottery scheduling
+  // Acquire parent lock to avoid race condition with setpriority
+  acquire(&p->lock);
   np->tickets = p->tickets;
   np->priority = p->priority;
+  release(&p->lock);
 
   pid = np->pid;
 
@@ -876,7 +883,7 @@ setpriority(int pid, int priority)
 
   for (p = proc; p < &proc[NPROC]; p++) {
     acquire(&p->lock);
-    if (p->pid == pid) {
+    if (p->pid == pid && p->state != UNUSED) {
       p->priority = priority;
       release(&p->lock);
       return 0;

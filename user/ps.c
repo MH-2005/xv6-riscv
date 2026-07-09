@@ -6,7 +6,7 @@
 int
 main(int argc, char *argv[])
 {
-  struct pinfo pi[64];
+  struct pinfo pi[NPROC];
   int n = getpinfo((uint64)pi);
   if (n < 0) {
     printf("getpinfo failed\n");
