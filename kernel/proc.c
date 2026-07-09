@@ -11,6 +11,26 @@ struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
 
+static int last_proc_index = -1;
+
+// Simple Linear Congruential Generator PRNG for lottery scheduling.
+// Section 3: uses system ticks as seed (requirement from project spec).
+// Only compiled when SCHEDULER == 2 (LOTTERY)
+#ifdef SCHEDULER
+#if SCHEDULER == 2
+static unsigned long prng_state = 1;
+
+static unsigned int
+prng(void)
+{
+  // Use system ticks as entropy source for the seed
+  prng_state = (unsigned long)ticks + 1;
+  prng_state = prng_state * 1103515245 + 12345;
+  return (unsigned int)((prng_state / 65536) % 32768);
+}
+#endif
+#endif
+
 struct proc *initproc;
 
 int nextpid = 1;
@@ -294,6 +314,10 @@ kfork(void)
 
   safestrcpy(np->name, p->name, sizeof(p->name));
 
+  // Inherit parent's tickets and priority — Section 3: Lottery scheduling
+  np->tickets = p->tickets;
+  np->priority = p->priority;
+
   pid = np->pid;
 
   release(&np->lock);
@@ -430,39 +454,159 @@ scheduler(void)
 {
   struct proc *p;
   struct cpu *c = mycpu();
-
   c->proc = 0;
-  for (;;) {
-    // The most recent process to run may have had interrupts
-    // turned off; enable them to avoid a deadlock if all
-    // processes are waiting. Then turn them back off
-    // to avoid a possible race between an interrupt
-    // and wfi.
-    intr_on();
-    intr_off();
 
+  for (;;)
+  {
+    // Avoid deadlock by ensuring interrupt-on when no lock held
+    intr_on();
+
+#ifdef SCHEDULER
+#if SCHEDULER == 1 // PRIORITY scheduling
+    intr_off();
     int found = 0;
-    for (p = proc; p < &proc[NPROC]; p++) {
+    int min_priority = 101;
+
+    // First pass: find minimum priority among RUNNABLE processes
+    for (p = proc; p < &proc[NPROC]; p++)
+    {
       acquire(&p->lock);
-      if (p->state == RUNNABLE) {
-        // Switch to chosen process.  It is the process's job
-        // to release its lock and then reacquire it
-        // before jumping back to us.
+      if (p->state == RUNNABLE && p->priority < min_priority)
+        min_priority = p->priority;
+      release(&p->lock);
+    }
+
+    if (min_priority == 101)
+    {
+      asm volatile("wfi");
+      continue;
+    }
+
+    // Second pass: pick next RUNNABLE process with min_priority (Round-Robin among ties)
+    struct proc *chosen = 0;
+    int chosen_index = -1;
+    for (int i = 1; i <= NPROC; i++)
+    {
+      int idx = (last_proc_index + i) % NPROC;
+      p = &proc[idx];
+      acquire(&p->lock);
+      if (p->state == RUNNABLE && p->priority == min_priority)
+      {
+        chosen = p;
+        chosen_index = idx;
+        release(&p->lock);
+        break;
+      }
+      release(&p->lock);
+    }
+
+    if (chosen != 0)
+    {
+      p = chosen;
+      acquire(&p->lock);
+      if (p->state == RUNNABLE)
+      {
         p->state = RUNNING;
         c->proc = p;
         swtch(&c->context, &p->context);
-
-        // Process is done running for now.
-        // It should have changed its p->state before coming back.
         c->proc = 0;
+        last_proc_index = chosen_index;
         found = 1;
       }
       release(&p->lock);
     }
-    if (found == 0) {
-      // nothing to run; stop running on this core until an interrupt.
+
+    if (found == 0)
+      asm volatile("wfi");
+
+#elif SCHEDULER == 2 // LOTTERY scheduling
+    intr_off();
+
+    // Calculate total tickets of all RUNNABLE processes
+    int total_tickets = 0;
+    for (p = proc; p < &proc[NPROC]; p++)
+    {
+      acquire(&p->lock);
+      if (p->state == RUNNABLE)
+        total_tickets += p->tickets;
+      release(&p->lock);
+    }
+
+    if (total_tickets == 0)
+    {
+      asm volatile("wfi");
+      continue;
+    }
+
+    // Generate winning ticket using PRNG seeded with ticks
+    unsigned int winning = prng() % total_tickets;
+
+    // Find the winning process
+    struct proc *chosen = 0;
+    int counter = 0;
+    for (p = proc; p < &proc[NPROC]; p++)
+    {
+      acquire(&p->lock);
+      if (p->state == RUNNABLE)
+      {
+        counter += p->tickets;
+        if (counter > winning)
+        {
+          chosen = p;
+          release(&p->lock);
+          break;
+        }
+      }
+      release(&p->lock);
+    }
+
+    if (chosen != 0)
+    {
+      p = chosen;
+      acquire(&p->lock);
+      if (p->state == RUNNABLE)
+      {
+        p->state = RUNNING;
+        c->proc = p;
+        swtch(&c->context, &p->context);
+        c->proc = 0;
+      }
+      release(&p->lock);
+    }
+    else
+    {
       asm volatile("wfi");
     }
+
+#else // Default: Round-Robin (original xv6)
+    for (p = proc; p < &proc[NPROC]; p++)
+    {
+      acquire(&p->lock);
+      if (p->state == RUNNABLE)
+      {
+        p->state = RUNNING;
+        c->proc = p;
+        swtch(&c->context, &p->context);
+        c->proc = 0;
+      }
+      release(&p->lock);
+    }
+#endif
+
+#else // SCHEDULER not defined — Default Round-Robin (original xv6)
+    for (p = proc; p < &proc[NPROC]; p++)
+    {
+      acquire(&p->lock);
+      if (p->state == RUNNABLE)
+      {
+        p->state = RUNNING;
+        c->proc = p;
+        swtch(&c->context, &p->context);
+        c->proc = 0;
+      }
+      release(&p->lock);
+    }
+#endif
   }
 }
 
@@ -720,4 +864,37 @@ getpinfo(uint64 addr)
     release(&p->lock);
   }
   return i;
+}
+
+int
+setpriority(int pid, int priority)
+{
+  struct proc *p;
+
+  if (priority < 0 || priority > 100)
+    return -1;
+
+  for (p = proc; p < &proc[NPROC]; p++) {
+    acquire(&p->lock);
+    if (p->pid == pid) {
+      p->priority = priority;
+      release(&p->lock);
+      return 0;
+    }
+    release(&p->lock);
+  }
+  return -1;
+}
+
+// Set ticket count for the calling process — Section 3: Lottery scheduling
+int
+settickets(int n)
+{
+  struct proc *p = myproc();
+  if (n < 1)
+    return -1;
+  acquire(&p->lock);
+  p->tickets = n;
+  release(&p->lock);
+  return 0;
 }
