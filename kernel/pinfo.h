@@ -6,6 +6,7 @@ struct pinfo {
   int state;
   int priority;
   int tickets;
+  int sched_count;
   char name[16];
 };
 

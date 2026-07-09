@@ -13,6 +13,10 @@ struct proc proc[NPROC];
 
 static int last_proc_index = -1;
 
+// Spinlocks for multi-core safety
+static struct spinlock sched_lock;
+static struct spinlock prng_lock;
+
 // Simple Linear Congruential Generator PRNG for lottery scheduling.
 // Section 3: uses system ticks as seed (requirement from project spec).
 // Only compiled when SCHEDULER == 2 (LOTTERY)
@@ -76,6 +80,8 @@ procinit(void)
 
   initlock(&pid_lock, "nextpid");
   initlock(&wait_lock, "wait_lock");
+  initlock(&sched_lock, "sched_lock");
+  initlock(&prng_lock, "prng_lock");
   for (p = proc; p < &proc[NPROC]; p++) {
     initlock(&p->lock, "proc");
     p->state = UNUSED;
@@ -152,6 +158,7 @@ found:
   
   p->priority = 50;
   p->tickets = 1;
+  p->sched_count = 0;
 
   // Allocate a trapframe page.
   if ((p->trapframe = (struct trapframe *)kalloc()) == 0) {
@@ -490,7 +497,6 @@ scheduler(void)
     }
 
     // Second pass: pick next RUNNABLE process with min_priority (Round-Robin among ties)
-    // Hold lock through swtch to avoid race condition (xv6 pattern)
     struct proc *chosen = 0;
     int chosen_index = -1;
     for (int i = 1; i <= NPROC; i++)
@@ -502,24 +508,25 @@ scheduler(void)
       {
         chosen = p;
         chosen_index = idx;
-        break;  // KEEP LOCK HELD through swtch
+        break;
       }
       release(&p->lock);
     }
 
     if (chosen != 0)
     {
-      // Lock already held from search loop
-      if (chosen->state == RUNNABLE)
+      p = chosen;
+      acquire(&p->lock);
+      if (p->state == RUNNABLE)
       {
-        chosen->state = RUNNING;
-        c->proc = chosen;
-        swtch(&c->context, &chosen->context);
+        p->state = RUNNING;
+        c->proc = p;
+        swtch(&c->context, &p->context);
         c->proc = 0;
         last_proc_index = chosen_index;
         found = 1;
       }
-      release(&chosen->lock);
+      release(&p->lock);
     }
 
     if (found == 0)
@@ -529,6 +536,7 @@ scheduler(void)
     intr_off();
 
     // Calculate total tickets of all RUNNABLE processes
+    acquire(&sched_lock);
     int total_tickets = 0;
     for (p = proc; p < &proc[NPROC]; p++)
     {
@@ -537,6 +545,7 @@ scheduler(void)
         total_tickets += p->tickets;
       release(&p->lock);
     }
+    release(&sched_lock);
 
     if (total_tickets == 0)
     {
@@ -544,11 +553,12 @@ scheduler(void)
       continue;
     }
 
-    // Generate winning ticket using PRNG seeded with ticks
+    // Generate winning ticket using PRNG seeded with ticks (thread-safe)
+    acquire(&prng_lock);
     unsigned int winning = prng() % total_tickets;
+    release(&prng_lock);
 
     // Find the winning process
-    // Hold lock through swtch to avoid race condition (xv6 pattern)
     struct proc *chosen = 0;
     int counter = 0;
     for (p = proc; p < &proc[NPROC]; p++)
@@ -560,7 +570,7 @@ scheduler(void)
         if (counter > winning)
         {
           chosen = p;
-          break;  // KEEP LOCK HELD through swtch
+          break;
         }
       }
       release(&p->lock);
@@ -568,15 +578,17 @@ scheduler(void)
 
     if (chosen != 0)
     {
-      // Lock already held from search loop
-      if (chosen->state == RUNNABLE)
+      p = chosen;
+      acquire(&p->lock);
+      if (p->state == RUNNABLE)
       {
-        chosen->state = RUNNING;
-        c->proc = chosen;
-        swtch(&c->context, &chosen->context);
+        p->state = RUNNING;
+        c->proc = p;
+        p->sched_count++;  // Increment schedule counter for statistics
+        swtch(&c->context, &p->context);
         c->proc = 0;
       }
-      release(&chosen->lock);
+      release(&p->lock);
     }
     else
     {
@@ -614,14 +626,6 @@ scheduler(void)
 #endif
   }
 }
-
-// Switch to scheduler.  Must hold only p->lock
-// and have changed proc->state. Saves and restores
-// intena because intena is a property of this
-// kernel thread, not this CPU. It should
-// be proc->intena and proc->noff, but that would
-// break in the few places where a lock is held but
-// there's no process.
 void
 sched(void)
 {
@@ -859,6 +863,7 @@ getpinfo(uint64 addr)
       pi.state = p->state;
       pi.priority = p->priority;
       pi.tickets = p->tickets;
+      pi.sched_count = p->sched_count;
       safestrcpy(pi.name, p->name, sizeof(pi.name));
       if (copyout(cp->pagetable, addr + i * sizeof(struct pinfo), (char *)&pi, sizeof(pi)) < 0) {
         release(&p->lock);

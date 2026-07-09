@@ -91,6 +91,7 @@ struct proc {
 
   int priority;
   int tickets;
+  int sched_count;  // Number of times scheduled (for lottery verification)
 
   // wait_lock must be held when using this:
   struct proc *parent; // Parent process

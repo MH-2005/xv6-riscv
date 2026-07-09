@@ -1,13 +1,11 @@
-// Test program for Priority Scheduling (Section 2)
-// Creates multiple children with different priorities and shows competition.
-
 #include "kernel/types.h"
 #include "user/user.h"
 
 int
 main(int argc, char *argv[])
 {
-  int priorities[3] = {10, 30, 50};  // lower = higher priority
+  int priorities[3] = {10, 30, 50};
+  int pids[3];
 
   printf("=== Priority Scheduling Test ===\n");
 
@@ -18,22 +16,24 @@ main(int argc, char *argv[])
       exit(1);
     }
     if (pid == 0) {
-      // Child: set own priority
-      setpriority(getpid(), priorities[i]);
-      printf("Child %d started with priority %d\n", getpid(), priorities[i]);
-
-      // Busy-loop to consume CPU
+      // Child: busy loop
       volatile int dummy = 0;
-      for (int j = 0; j < 1000000; j++) {
+      for (int j = 0; j < 2000000; j++) {
         dummy += j;
       }
-
-      printf("Child %d (priority %d) finished\n", getpid(), priorities[i]);
+      printf("Child %d finished\n", getpid());
       exit(0);
+    } else {
+      pids[i] = pid;
     }
   }
 
-  // Parent waits for all children
+  // Parent sets priorities for each child
+  for (int i = 0; i < 3; i++) {
+    setpriority(pids[i], priorities[i]);
+    printf("Parent set priority %d for pid %d\n", priorities[i], pids[i]);
+  }
+
   for (int i = 0; i < 3; i++) {
     wait(0);
   }
