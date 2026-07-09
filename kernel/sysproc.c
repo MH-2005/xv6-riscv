@@ -116,3 +116,21 @@ sys_getpinfo(void)
   argaddr(0, &addr);
   return getpinfo(addr);
 }
+
+uint64
+sys_setpriority(void)
+{
+  int pid;
+  int priority;
+  argint(0, &pid);
+  argint(1, &priority);
+  return setpriority(pid, priority);
+}
+
+uint64
+sys_settickets(void)
+{
+  int n;
+  argint(0, &n);
+  return settickets(n);
+}
