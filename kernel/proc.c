@@ -536,6 +536,7 @@ scheduler(void)
         }
         chosen->state = RUNNING;
         c->proc = chosen;
+        release(&chosen->lock);  // Release lock BEFORE swtch to avoid deadlock
         swtch(&c->context, &chosen->context);
         c->proc = 0;
 
@@ -543,7 +544,6 @@ scheduler(void)
         last_proc_index = chosen_index;
         release(&sched_lock);
 
-        release(&chosen->lock);
         found = 1;
       }
 
@@ -601,9 +601,9 @@ scheduler(void)
         chosen->state = RUNNING;
         c->proc = chosen;
         chosen->sched_count++;  // Increment schedule counter for statistics
+        release(&chosen->lock);  // Release lock BEFORE swtch to avoid deadlock
         swtch(&c->context, &chosen->context);
         c->proc = 0;
-        release(&chosen->lock);
       }
       else
       {
