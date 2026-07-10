@@ -35,7 +35,6 @@ main(int argc, char *argv[])
   }
 
   // Give scheduler time to run and distribute CPU
-  // Using busy wait instead of sleep() since sleep() not available
   volatile long w = 0;
   for (long j = 0; j < 5000000; j++) w++;
 

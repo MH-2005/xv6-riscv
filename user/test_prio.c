@@ -18,13 +18,19 @@ main(int argc, char *argv[])
       exit(1);
     }
     if (pid == 0) {
-      // Child: CPU-bound work
+      // Child: set own priority
+      setpriority(getpid(), priorities[i]);
+      printf("Child %d started with priority %d
+", getpid(), priorities[i]);
+
+      // Busy-loop to consume CPU
       volatile int dummy = 0;
-      for (int j = 0; j < 2000000; j++) {
+      for (int j = 0; j < 1000000; j++) {
         dummy += j;
       }
-      printf("Child %d finished
-", getpid());
+
+      printf("Child %d (priority %d) finished
+", getpid(), priorities[i]);
       exit(0);
     } else {
       pids[i] = pid;
