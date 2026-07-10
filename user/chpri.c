@@ -5,16 +5,19 @@ int
 main(int argc, char *argv[])
 {
   if (argc != 3) {
-    printf("usage: chpri pid priority\\n");
+    printf("usage: chpri pid priority
+");
     exit(1);
   }
   int pid = atoi(argv[1]);
   int priority = atoi(argv[2]);
   int ret = setpriority(pid, priority);
   if (ret < 0) {
-    printf("chpri: failed to set priority\\n");
+    printf("chpri: failed to set priority
+");
     exit(1);
   }
-  printf("priority of pid %d set to %d\\n", pid, priority);
+  printf("priority of pid %d set to %d
+", pid, priority);
   exit(0);
 }
