@@ -9,13 +9,13 @@ main(int argc, char *argv[])
   int tickets[3] = {10, 30, 100};
   int pids[3];
 
-  printf("=== Lottery Scheduling Statistical Test ===\n");
-  printf("Creating 3 children with tickets: 10, 30, 100\n");
+  printf("=== Lottery Scheduling Statistical Test ===\\n");
+  printf("Creating 3 children with tickets: 10, 30, 100\\n");
 
   for (int i = 0; i < 3; i++) {
     int pid = fork();
     if (pid < 0) {
-      printf("fork failed\n");
+      printf("fork failed\\n");
       exit(1);
     }
     if (pid == 0) {
@@ -36,11 +36,11 @@ main(int argc, char *argv[])
   struct pinfo pi[NPROC];
   int n = getpinfo((uint64)pi);
   
-  printf("\n=== Scheduling Statistics ===\n");
+  printf("\\n=== Scheduling Statistics ===\\n");
   for (int i = 0; i < n; i++) {
     for (int j = 0; j < 3; j++) {
       if (pi[i].pid == pids[j]) {
-        printf("PID %d: tickets=%d, sched_count=%d\n",
+        printf("PID %d: tickets=%d, sched_count=%d\\n",
                pi[i].pid, pi[i].tickets, pi[i].sched_count);
       }
     }
@@ -50,7 +50,7 @@ main(int argc, char *argv[])
     wait(0);
   }
 
-  printf("\n=== Lottery Test Complete ===\n");
-  printf("Expected: sched_count roughly proportional to tickets\n");
+  printf("\\n=== Lottery Test Complete ===\\n");
+  printf("Expected: sched_count roughly proportional to tickets\\n");
   exit(0);
 }
