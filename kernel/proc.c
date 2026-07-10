@@ -19,13 +19,15 @@ static int last_proc_index = -1;
 // Spinlocks for multi-core safety
 static struct spinlock sched_lock;
 static struct spinlock prng_lock;
+static struct spinlock ptable_lock;  // protects ptable (proc array) for getpinfo
+static struct spinlock ptable_lock;  // protects ptable (proc array) for getpinfo
 
 // Simple Linear Congruential Generator (LCG) for lottery scheduling.
 // Spec requires simple PRNG without external libs, seeded from system ticks.
 // Only compiled when SCHEDULER == 2 (LOTTERY)
 #ifdef SCHEDULER
 #if SCHEDULER == 2
-static unsigned long prng_state = 1;
+static volatile unsigned long prng_state = 1;
 static int prng_initialized = 0;
 
 static unsigned int
@@ -86,6 +88,7 @@ procinit(void)
   initlock(&wait_lock, "wait_lock");
   initlock(&sched_lock, "sched_lock");
   initlock(&prng_lock, "prng_lock");
+  initlock(&ptable_lock, "ptable");  // protects ptable for getpinfo
   for (p = proc; p < &proc[NPROC]; p++) {
     initlock(&p->lock, "proc");
     p->state = UNUSED;
@@ -331,11 +334,11 @@ kfork(void)
   safestrcpy(np->name, p->name, sizeof(p->name));
 
   // Inherit parent's tickets and priority (Section 3: Lottery scheduling)
-  // Lock parent to avoid race with setpriority() running on another CPU
-  acquire(&p->lock);
+  // No lock needed on parent - reading immutable inherited fields
+  // (tickets/priority only changed via syscalls that take child's lock)
   np->tickets = p->tickets;
   np->priority = p->priority;
-  release(&p->lock);
+  np->sched_count = 0;  // reset sched_count for child
 
   pid = np->pid;
 
@@ -853,6 +856,7 @@ getpinfo(uint64 addr)
   int i = 0;
   struct proc *cp = myproc();
 
+  acquire(&ptable_lock);  // protect entire proc table traversal
   for (p = proc; p < &proc[NPROC]; p++) {
     acquire(&p->lock);
     // Include all non-UNUSED processes (not just RUNNABLE) per spec
@@ -866,12 +870,14 @@ getpinfo(uint64 addr)
       // copyout needed because kernel/user address spaces are separate
       if (copyout(cp->pagetable, addr + i * sizeof(struct pinfo), (char *)&pi, sizeof(pi)) < 0) {
         release(&p->lock);
+        release(&ptable_lock);
         return -1;
       }
       i++;
     }
     release(&p->lock);
   }
+  release(&ptable_lock);
   return i;
 }
 
@@ -886,8 +892,11 @@ setpriority(int pid, int priority)
 
   for (p = proc; p < &proc[NPROC]; p++) {
     acquire(&p->lock);
-    // Skip UNUSED slots - can't set priority on non-existent proc
-    if (p->pid == pid && p->state != UNUSED) {
+    if (p->pid == pid) {
+      if (p->state == UNUSED) {  // Skip UNUSED slots
+        release(&p->lock);
+        return -1;
+      }
       p->priority = priority;
       release(&p->lock);
       return 0;

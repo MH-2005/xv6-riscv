@@ -75,18 +75,16 @@ CFLAGS += -fno-builtin-memcpy -Wno-main
 CFLAGS += -fno-builtin-printf -fno-builtin-fprintf -fno-builtin-vprintf
 CFLAGS += -I.
 CFLAGS += $(shell $(CC) -fno-stack-protector -E -x c /dev/null >/dev/null 2>&1 && echo -fno-stack-protector)
-ifdef SCHEDULER
-# Scheduler selection: SCHEDULER=1 for PRIORITY, SCHEDULER=2 for LOTTERY, undefined for default RR
-# Usage: make qemu SCHEDULER=PRIORITY  or  make qemu SCHEDULER=LOTTERY
-ifeq ($(SCHEDULER),PRIORITY)
+ifndef SCHEDULER
+  SCHEDULER_DEF := 0
+else ifeq ($(SCHEDULER),PRIORITY)
   SCHEDULER_DEF := 1
 else ifeq ($(SCHEDULER),LOTTERY)
   SCHEDULER_DEF := 2
 else
-  SCHEDULER_DEF := 0
+  $(error Invalid SCHEDULER value. Use PRIORITY or LOTTERY.)
 endif
 CFLAGS += -DSCHEDULER=$(SCHEDULER_DEF)
-endif
 
 # Disable PIE when possible (for Ubuntu 16.10 toolchain)
 ifneq ($(shell $(CC) -dumpspecs 2>/dev/null | grep -e '[^f]no-pie'),)
@@ -164,7 +162,7 @@ UPROGS=\
 	$U/_test_prio\
 	$U/_test_lottery\
 	$U/_test_ps\
-	$U/_test_stress\
+	$U/_test_stress
 
 fs.img: mkfs/mkfs README $(UPROGS)
 	mkfs/mkfs fs.img README $(UPROGS)

@@ -114,7 +114,13 @@ sys_getpinfo(void)
 {
   uint64 addr;
   argaddr(0, &addr);
-  return getpinfo(addr);
+  struct proc *p = myproc();
+
+  // Validate user address range
+  if (addr < p->sz && addr + sizeof(struct pinfo) * NPROC <= p->sz) {
+    return getpinfo(addr);
+  }
+  return -1;
 }
 
 uint64

@@ -20,7 +20,6 @@ main(int argc, char *argv[])
     }
     if (pid == 0) {
       settickets(tickets[i]);
-      // CPU-bound work
       volatile long count = 0;
       for (long j = 0; j < 20000000; j++) {
         count++;
@@ -31,11 +30,9 @@ main(int argc, char *argv[])
     }
   }
 
-  // Give scheduler time to run and distribute CPU
   volatile long w = 0;
   for (long j = 0; j < 5000000; j++) w++;
 
-  // Get scheduling statistics via getpinfo
   struct pinfo pi[NPROC];
   int n = getpinfo((uint64)pi);
   

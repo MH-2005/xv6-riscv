@@ -16,11 +16,9 @@ main(int argc, char *argv[])
       exit(1);
     }
     if (pid == 0) {
-      // Child: set own priority
       setpriority(getpid(), priorities[i]);
       printf("Child %d started with priority %d\n", getpid(), priorities[i]);
 
-      // Busy-loop to consume CPU
       volatile int dummy = 0;
       for (int j = 0; j < 1000000; j++) {
         dummy += j;
@@ -33,7 +31,6 @@ main(int argc, char *argv[])
     }
   }
 
-  // Parent sets each child's priority via syscall
   for (int i = 0; i < 3; i++) {
     setpriority(pids[i], priorities[i]);
     printf("Parent set priority %d for pid %d\n", priorities[i], pids[i]);
