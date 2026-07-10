@@ -20,7 +20,7 @@ static int last_proc_index = -1;
 static struct spinlock sched_lock;
 static struct spinlock prng_lock;
 static struct spinlock ptable_lock;  // protects ptable (proc array) for getpinfo
-static struct spinlock ptable_lock;  // protects ptable (proc array) for getpinfo
+
 
 // Simple Linear Congruential Generator (LCG) for lottery scheduling.
 // Spec requires simple PRNG without external libs, seeded from system ticks.
@@ -530,6 +530,10 @@ scheduler(void)
       {
         // chosen->lock is still held from the search loop above.
         // Do NOT acquire it again here — that would self-deadlock.
+        if (chosen->killed) {  // Don't run killed processes
+          release(&chosen->lock);
+          continue;
+        }
         chosen->state = RUNNING;
         c->proc = chosen;
         swtch(&c->context, &chosen->context);
@@ -590,9 +594,13 @@ scheduler(void)
       {
         // chosen->lock is still held from the search loop above.
         // Do NOT acquire it again here — that would self-deadlock.
+        if (chosen->killed) {  // Don't run killed processes
+          release(&chosen->lock);
+          continue;
+        }
         chosen->state = RUNNING;
         c->proc = chosen;
-        chosen->sched_count++;
+        chosen->sched_count++;  // Increment schedule counter for statistics
         swtch(&c->context, &chosen->context);
         c->proc = 0;
         release(&chosen->lock);
