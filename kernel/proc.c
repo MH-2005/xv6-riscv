@@ -544,6 +544,7 @@ scheduler(void)
         last_proc_index = chosen_index;
         release(&sched_lock);
 
+        release(&chosen->lock);  // Release AFTER swtch returns (xv6 pattern)
         found = 1;
       }
 
@@ -604,6 +605,7 @@ scheduler(void)
         release(&chosen->lock);  // Release lock BEFORE swtch to avoid deadlock
         swtch(&c->context, &chosen->context);
         c->proc = 0;
+        release(&chosen->lock);  // Release AFTER swtch returns (xv6 pattern)
       }
       else
       {
