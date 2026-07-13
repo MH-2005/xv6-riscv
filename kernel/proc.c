@@ -536,7 +536,6 @@ scheduler(void)
         }
         chosen->state = RUNNING;
         c->proc = chosen;
-        release(&chosen->lock);  // Release lock BEFORE swtch to avoid deadlock
         swtch(&c->context, &chosen->context);
         c->proc = 0;
 
@@ -602,7 +601,6 @@ scheduler(void)
         chosen->state = RUNNING;
         c->proc = chosen;
         chosen->sched_count++;  // Increment schedule counter for statistics
-        release(&chosen->lock);  // Release lock BEFORE swtch to avoid deadlock
         swtch(&c->context, &chosen->context);
         c->proc = 0;
         release(&chosen->lock);  // Release AFTER swtch returns (xv6 pattern)
