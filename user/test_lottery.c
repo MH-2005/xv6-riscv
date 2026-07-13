@@ -20,8 +20,10 @@ main(int argc, char *argv[])
     }
     if (pid == 0) {
       settickets(tickets[i]);
+
+      // Extremely long CPU-bound loop – will generate many scheduling events
       volatile long count = 0;
-      for (long j = 0; j < 20000000; j++) {
+      for (long j = 0; j < 2000000000L; j++) {
         count++;
       }
       exit(0);
@@ -30,27 +32,40 @@ main(int argc, char *argv[])
     }
   }
 
-  volatile long w = 0;
-  for (long j = 0; j < 5000000; j++) w++;
+  // Let the children run and accumulate significant statistics
+  printf("Letting children run for ~15 seconds...\n");
+  pause(150);
 
   struct pinfo pi[NPROC];
   int n = getpinfo((uint64)pi);
-  
-  printf("\n=== Scheduling Statistics ===\n");
+  if (n < 0) {
+    printf("getpinfo failed\n");
+    exit(1);
+  }
+
+  int counts[3] = {0, 0, 0};
   for (int i = 0; i < n; i++) {
     for (int j = 0; j < 3; j++) {
       if (pi[i].pid == pids[j]) {
-        printf("PID %d: tickets=%d, sched_count=%d\n",
-               pi[i].pid, pi[i].tickets, pi[i].sched_count);
+        counts[j] = pi[i].sched_count;
       }
     }
   }
 
+  int total = counts[0] + counts[1] + counts[2];
+  printf("\n=== Mid-run Scheduling Statistics ===\n");
+  for (int j = 0; j < 3; j++) {
+    int percent = total ? (counts[j] * 100) / total : 0;
+    printf("PID %d: tickets=%d, sched_count=%d (~%d%% of CPU)\n",
+           pids[j], tickets[j], counts[j], percent);
+  }
+  printf("Expected: sched_count proportional to tickets (10:30:100 ~ 7%%:21%%:71%%)\n");
+
+  // Wait for all children to finish
   for (int i = 0; i < 3; i++) {
     wait(0);
   }
 
   printf("\n=== Lottery Test Complete ===\n");
-  printf("Expected: sched_count roughly proportional to tickets\n");
   exit(0);
 }

@@ -9,6 +9,7 @@ main(int argc, char *argv[])
 
   printf("=== Priority Scheduling Test ===\n");
 
+  // Fork children
   for (int i = 0; i < 3; i++) {
     int pid = fork();
     if (pid < 0) {
@@ -16,28 +17,36 @@ main(int argc, char *argv[])
       exit(1);
     }
     if (pid == 0) {
+      // Child: only set priority and compute – no prints!
       setpriority(getpid(), priorities[i]);
-      printf("Child %d started with priority %d\n", getpid(), priorities[i]);
 
       volatile int dummy = 0;
       for (int j = 0; j < 1000000; j++) {
         dummy += j;
       }
 
-      printf("Child %d (priority %d) finished\n", getpid(), priorities[i]);
       exit(0);
     } else {
       pids[i] = pid;
     }
   }
 
+  // Parent: set priority for each child (though child already did, but it's safe)
   for (int i = 0; i < 3; i++) {
     setpriority(pids[i], priorities[i]);
     printf("Parent set priority %d for pid %d\n", priorities[i], pids[i]);
   }
 
+  // Wait for each child and report in order of completion
   for (int i = 0; i < 3; i++) {
-    wait(0);
+    int cpid = wait(0);
+    // Find which priority this child had
+    for (int j = 0; j < 3; j++) {
+      if (pids[j] == cpid) {
+        printf("Child pid %d (priority %d) finished\n", cpid, priorities[j]);
+        break;
+      }
+    }
   }
 
   printf("=== Priority Test Complete ===\n");

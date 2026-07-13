@@ -3,6 +3,17 @@
 #include "kernel/pinfo.h"
 #include "kernel/param.h"
 
+static void
+print_pad(int n)
+{
+  if (n < 10)
+    printf("  %d", n);
+  else if (n < 100)
+    printf(" %d", n);
+  else
+    printf("%d", n);
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -12,7 +23,9 @@ main(int argc, char *argv[])
     printf("getpinfo failed\n");
     exit(1);
   }
-  printf("PID\tSTATE\tPRI\tTKT\tSCH\tNAME\n");
+
+  printf("PID   STATE     PRI  TKT  SCH NAME\n");
+
   for (int i = 0; i < n; i++) {
     char *state;
     switch (pi[i].state) {
@@ -24,8 +37,32 @@ main(int argc, char *argv[])
       case 5: state = "ZOMBIE"; break;
       default: state = "UNKNOWN"; break;
     }
-    printf("%d\t%s\t%d\t%d\t%d\t%s\n",
-           pi[i].pid, state, pi[i].priority, pi[i].tickets, pi[i].sched_count, pi[i].name);
+
+    // PID
+    if (pi[i].pid < 10)
+      printf("  %d   ", pi[i].pid);
+    else if (pi[i].pid < 100)
+      printf(" %d   ", pi[i].pid);
+    else
+      printf("%d   ", pi[i].pid);
+
+    // STATE
+    printf("%s", state);
+    int slen = strlen(state);
+    for (int j = slen; j < 9; j++)
+      printf(" ");
+
+    // PRI, TKT, SCH
+    print_pad(pi[i].priority);
+    printf("  ");
+    print_pad(pi[i].tickets);
+    printf("  ");
+    print_pad(pi[i].sched_count);
+    printf("  ");
+
+    // NAME
+    printf("%s\n", pi[i].name);
   }
+
   exit(0);
 }

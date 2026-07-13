@@ -158,7 +158,6 @@ UPROGS=\
 	$U/_sync\
 	$U/_ps\
 	$U/_chpri\
-	$U/_lottery\
 	$U/_test_prio\
 	$U/_test_lottery\
 	$U/_test_ps\

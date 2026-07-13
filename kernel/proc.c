@@ -38,8 +38,8 @@ prng(void)
     prng_state = (unsigned long)ticks + 1;
     prng_initialized = 1;
   }
-  // Standard LCG parameters, add ticks each call for more entropy
-  prng_state = prng_state * 1103515245 + 12345 + ticks;
+  // Standard LCG parameters
+  prng_state = prng_state * 1103515245 + 12345;
   return (unsigned int)((prng_state / 65536) % 32768);
 }
 #endif
@@ -334,10 +334,11 @@ kfork(void)
   safestrcpy(np->name, p->name, sizeof(p->name));
 
   // Inherit parent's tickets and priority (Section 3: Lottery scheduling)
-  // No lock needed on parent - reading immutable inherited fields
-  // (tickets/priority only changed via syscalls that take child's lock)
+  // Acquire parent lock to prevent race with concurrent setpriority/settickets.
+  acquire(&p->lock);
   np->tickets = p->tickets;
   np->priority = p->priority;
+  release(&p->lock);
   np->sched_count = 0;  // reset sched_count for child
 
   pid = np->pid;
@@ -489,7 +490,6 @@ scheduler(void)
     // then pick the next one after last_proc_index with that priority
     // (Round-Robin tie-breaking, per spec).
     {
-      int found = 0;
       int min_priority = 101;
 
       for (p = proc; p < &proc[NPROC]; p++)
@@ -526,14 +526,10 @@ scheduler(void)
         release(&p->lock);
       }
 
-      if (chosen != 0)
-      {
+      if (chosen == 0) {
+        asm volatile("wfi");
+      } else {
         // chosen->lock is still held from the search loop above.
-        // Do NOT acquire it again here — that would self-deadlock.
-        if (chosen->killed) {  // Don't run killed processes
-          release(&chosen->lock);
-          continue;
-        }
         chosen->state = RUNNING;
         c->proc = chosen;
         swtch(&c->context, &chosen->context);
@@ -544,11 +540,7 @@ scheduler(void)
         release(&sched_lock);
 
         release(&chosen->lock);  // Release AFTER swtch returns (xv6 pattern)
-        found = 1;
       }
-
-      if (found == 0)
-        asm volatile("wfi");
     }
 
 #elif defined(SCHEDULER) && SCHEDULER == 2
@@ -593,11 +585,6 @@ scheduler(void)
       if (chosen != 0)
       {
         // chosen->lock is still held from the search loop above.
-        // Do NOT acquire it again here — that would self-deadlock.
-        if (chosen->killed) {  // Don't run killed processes
-          release(&chosen->lock);
-          continue;
-        }
         chosen->state = RUNNING;
         c->proc = chosen;
         chosen->sched_count++;  // Increment schedule counter for statistics
@@ -634,6 +621,14 @@ scheduler(void)
 #endif
   }
 }
+
+// Switch to scheduler.  Must hold only p->lock
+// and have changed proc->state. Saves and restores
+// intena because intena is a property of this
+// kernel thread, not this CPU. It should
+// be proc->intena and proc->noff, but that would
+// break in the few places where a lock is held but
+// there's no process.
 void
 sched(void)
 {
